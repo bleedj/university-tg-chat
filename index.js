@@ -126,10 +126,10 @@ bot.action("switch_week", async (ctx) => {
 bot.action("all_deadlines", (ctx) => {
   let response = "Все дедлайны:\n\n";
 
-  deadlines.дедлайны.forEach((student) => {
-    student.дедлайны.forEach((deadline) => {
-      response += `Предмет: ${deadline.предмет}\nДедлайн: ${formatDate(
-        new Date(deadline.дата)
+  deadlines.deadlines.forEach((student) => {
+    student.deadlines.forEach((deadline) => {
+      response += `Предмет: ${deadline.object}\nДедлайн: ${formatDate(
+        new Date(deadline.date)
       )}\n\n`;
     });
   });
@@ -203,10 +203,12 @@ bot.command("schedule", async (ctx) => {
 bot.command("deadlines", (ctx) => {
   let response = "Дедлайны, которые еще не наступили:\n\n";
 
-  deadlines.дедлайны.forEach((student) => {
-    student.дедлайны.forEach((deadline) => {
-      const now = new Date();
-      const deadlineDate = new Date(deadline.дата);
+  if (deadlines && deadlines.дедлайны) {
+    for (const student of deadlines.дедлайны) {
+      if (student && student.дедлайны) {
+        for (const deadline of student.дедлайны) {
+          const now = new Date();
+          const deadlineDate = new Date(deadline.дата);
 
       // Проверка, если дедлайн еще не наступил
       if (deadlineDate > now) {
@@ -214,8 +216,10 @@ bot.command("deadlines", (ctx) => {
           deadlineDate
         )}\n\n`;
       }
-    });
-  });
+    }
+  }
+}
+};
 
   const keyboard = Markup.inlineKeyboard([
     Markup.button.callback("Все дедлайны", "all_deadlines"),
@@ -227,8 +231,8 @@ bot.command("deadlines", (ctx) => {
 bot.command("faq", (ctx) => {
   let response = "Часто задаваемые вопросы и ответы:\n\n";
 
-  faq.вопросы_и_ответы.forEach((qa) => {
-    response += `Вопрос: ${qa.вопрос}\nОтвет: ${qa.ответ}\n\n`;
+  faq.faq.forEach((qa) => {
+    response += `Вопрос: ${qa.question}\nОтвет: ${qa.answer}\n\n`;
   });
 
   ctx.reply(response);
