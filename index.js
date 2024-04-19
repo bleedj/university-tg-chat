@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const dayMapper = {
   Sunday: "Воскресенье",
   Monday: "Понедельник",
@@ -9,7 +10,23 @@ const dayMapper = {
   Saturday: "Суббота",
 };
 
- function formatDate(date) {
+const { Telegraf, Markup } = require("telegraf");
+const axios = require("axios");
+const JSONSchedule = require("./assets/schedule.json");
+const deadlinesData = require("./assets/deadlines.json");
+const faqData = require("./assets/faq.json");
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const CHAD_API_KEY = process.env.CHAD_API_KEY;
+
+const preparedSchedule = JSON.parse(JSON.stringify(JSONSchedule));
+const deadlines = JSON.parse(JSON.stringify(deadlinesData));
+const faq = JSON.parse(JSON.stringify(faqData));
+
+const account = "https://org.fa.ru/";
+const schedule = "https://ruz.fa.ru/";
+const campus = "https://campus.fa.ru/";
+
+function formatDate(date) {
   const options = {
     year: "numeric",
     month: "long",
@@ -20,11 +37,131 @@ const dayMapper = {
   return date.toLocaleString("ru-RU", options);
 }
 
- function getRussianDayName(englishDayName) {
+async function fetchSchedule(period) {
+  try {
+    const currentDate = new Date();
+    let startDate, finishDate;
+
+    if (period === "day") {
+      startDate = currentDate.toISOString().split("T")[0];
+      finishDate = startDate;
+    } else if (period === "week") {
+      startDate = currentDate.toISOString().split("T")[0];
+      finishDate = new Date(currentDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+    }
+
+    const url = `https://ruz.fa.ru/api/schedule/group/111296?start=${startDate}&finish=${finishDate}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const extractedData = data.map((item) => ({
+      date: item.date,
+      dayOfWeekString: item.dayOfWeekString,
+      beginLesson: item.beginLesson,
+      endLesson: item.endLesson,
+      group: item.group,
+      discipline: item.discipline,
+      lecturer: item.lecturer,
+      lecturerEmail: item.lecturerEmail,
+      kindOfWork: item.kindOfWork,
+      auditorium: item.auditorium,
+    }));
+
+    return extractedData;
+  } catch (error) {
+    console.error("Error fetching or processing data:", error);
+    return null;
+  }
+}
+
+function getRussianDayName(englishDayName) {
   return dayMapper[englishDayName] || "Неизвестно";
 }
 
- function getCurrentWeekSchedule(invert = false) {
+async function sendSchedule(ctx, response) {
+  if (!response || response.length === 0) {
+    ctx.reply("На этот период нет расписания.");
+    return;
+  }
+
+  let currentDate = "";
+  let currentDayMessages = [];
+
+  response.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  for (const item of response) {
+    const formattedDate = formatDateInSchedule(item.date);
+
+    if (formattedDate !== currentDate) {
+      if (currentDayMessages.length > 0) {
+        const fullDayMessage = currentDayMessages.join("\n");
+        await sendMessageWithDelay(ctx, fullDayMessage);
+        currentDayMessages = [];
+      }
+      currentDate = formattedDate;
+      currentDayMessages.push(`*${formattedDate}*\n\n`);
+    }
+
+    let lecturer = item.lecturer ? item.lecturer : "_Нет данных_ 😞";
+    let lecturerEmail = item.lecturerEmail
+      ? item.lecturerEmail
+      : "_Нет данных_ 😞";
+
+    let scheduleString = `*Начало:* ${item.beginLesson}, *Конец:* ${item.endLesson}\n`;
+    scheduleString += `*Дисциплина:* ${item.discipline}\n`;
+    scheduleString += `👨‍🏫 *Преподаватель:* ${lecturer}\n`;
+    scheduleString += `📩 *Email:* ${lecturerEmail}\n`;
+    scheduleString += `📚 *Вид занятия:* ${item.kindOfWork}\n`;
+    scheduleString += `🏢 *Аудитория:* ${item.auditorium}\n\n`;
+
+    currentDayMessages.push(scheduleString);
+  }
+
+  if (currentDayMessages.length > 0) {
+    const fullDayMessage = currentDayMessages.join("\n");
+    await sendMessageWithDelay(ctx, fullDayMessage);
+  }
+}
+
+async function sendMessageWithDelay(ctx, message) {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await ctx.replyWithMarkdown(message);
+}
+
+function formatDateInSchedule(dateString) {
+  const date = new Date(dateString);
+  const days = [
+    "Воскресенье",
+    "Понедельник",
+    "Вторник",
+    "Среда",
+    "Четверг",
+    "Пятница",
+    "Суббота",
+  ];
+  const months = [
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+  ];
+  const dayOfWeek = days[date.getDay()];
+  const dayOfMonth = date.getDate();
+  const month = months[date.getMonth()];
+  return `${dayOfWeek}, ${dayOfMonth} ${month}`;
+}
+
+function getCurrentWeekSchedule(invert = false) {
   const currentDate = new Date();
   const startDate = new Date("April 8, 2024");
   const millisecondsInWeek = 7 * 24 * 60 * 60 * 1000;
@@ -41,35 +178,6 @@ const dayMapper = {
     ? preparedSchedule.EVEN_WEEK.schedule
     : preparedSchedule.ODD_WEEK.schedule;
 }
-
-const { Telegraf, Markup } = require("telegraf");
-const axios = require("axios");
-const JSONSchedule = require("./assets/schedule.json");
-const deadlinesData = require("./assets/deadlines.json");
-const faqData = require("./assets/faq.json");
-const bot = new Telegraf(process.env.BOT_TOKEN);
-const CHAD_API_KEY = process.env.CHAD_API_KEY;
-
-const preparedSchedule = JSON.parse(JSON.stringify(JSONSchedule));
-const deadlines = JSON.parse(JSON.stringify(deadlinesData));
-const faq = JSON.parse(JSON.stringify(faqData));
-
-
-
-
-
-const account = "https://org.fa.ru/";
-const schedule = "https://ruz.fa.ru/";
-
-const days = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
 
 bot.action("full_week_schedule", async (ctx) => {
   let response = "*Расписание на текущую неделю:*\n";
@@ -124,17 +232,37 @@ bot.action("switch_week", async (ctx) => {
 });
 
 bot.action("all_deadlines", (ctx) => {
-  let response = "Все дедлайны:\n\n";
+  let response = "*Все дедлайны:*\n\n";
 
   deadlines.deadlines.forEach((student) => {
     student.deadlines.forEach((deadline) => {
-      response += `Предмет: ${deadline.object}\nДедлайн: ${formatDate(
+      response += `✍🏽 *Предмет:* ${deadline.object}\n⏰ *Дедлайн:* ${formatDate(
         new Date(deadline.date)
       )}\n\n`;
     });
   });
 
-  ctx.reply(response);
+  ctx.reply(response, { parse_mode: "Markdown" });
+});
+
+bot.action("schedule_day", async (ctx) => {
+  try {
+    const response = await fetchSchedule("day");
+    sendSchedule(ctx, response);
+  } catch (error) {
+    console.error("Error:", error);
+    ctx.reply("Произошла ошибка при получении расписания.");
+  }
+});
+
+bot.action("schedule_week", async (ctx) => {
+  try {
+    const response = await fetchSchedule("week");
+    sendSchedule(ctx, response);
+  } catch (error) {
+    console.error("Error:", error);
+    ctx.reply("Произошла ошибка при получении расписания.");
+  }
 });
 
 bot.command("question", (ctx) => {
@@ -175,67 +303,49 @@ bot.command("question", (ctx) => {
 });
 
 bot.command("schedule", async (ctx) => {
-  const date = new Date();
-  var day = days[date.getDay()];
-
-  let response = `Расписание на сегодня:\n`;
-
-  const currentDaySchedule = preparedSchedule.ODD_WEEK.schedule[day];
-  if (!currentDaySchedule || currentDaySchedule.length === 0) {
-    response += "На сегодня занятий нет.";
-  } else {
-    currentDaySchedule.forEach((lesson) => {
-      response += `\nПара ${lesson.pair}: ${lesson.subject}, ${lesson.time}, ауд. ${lesson.classroom}, ${lesson.type}, преп. ${lesson.lecturer}`;
-    });
-  }
-
-  response +=
-    "\n\n\nА еще, по кнопке ниже можешь сходить в портал за более детальным расписанием =)";
-
   const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback("Расписание на неделю", "full_week_schedule")],
-    [{ text: "За актуальным расписанием", web_app: { url: schedule } }],
+    Markup.button.callback("На день", "schedule_day"),
+    Markup.button.callback("На всю неделю", "schedule_week"),
   ]);
 
-  ctx.reply(response, keyboard);
+  ctx.reply("Выберите период расписания:", keyboard);
 });
 
 bot.command("deadlines", (ctx) => {
-  let response = "Дедлайны, которые еще не наступили:\n\n";
+  let response = "*Дедлайны, которые еще не наступили:*\n\n";
 
-  if (deadlines && deadlines.дедлайны) {
-    for (const student of deadlines.дедлайны) {
-      if (student && student.дедлайны) {
-        for (const deadline of student.дедлайны) {
+  if (deadlines && deadlines.deadlines) {
+    for (const student of deadlines.deadlines) {
+      if (student && student.deadlines) {
+        for (const deadline of student.deadlines) {
           const now = new Date();
-          const deadlineDate = new Date(deadline.дата);
+          const deadlineDate = new Date(deadline.date);
 
-      // Проверка, если дедлайн еще не наступил
-      if (deadlineDate > now) {
-        response += `Предмет: ${deadline.предмет}\nДедлайн: ${formatDate(
-          deadlineDate
-        )}\n\n`;
+          if (deadlineDate > now) {
+            response += `📚 *Предмет:* ${
+              deadline.object
+            }\n⏳ *Дедлайн:* ${formatDate(deadlineDate)}\n\n`;
+          }
+        }
       }
     }
   }
-}
-};
 
   const keyboard = Markup.inlineKeyboard([
     Markup.button.callback("Все дедлайны", "all_deadlines"),
   ]);
 
-  ctx.reply(response, keyboard);
+  ctx.reply(response, { parse_mode: "Markdown", ...keyboard });
 });
 
 bot.command("faq", (ctx) => {
-  let response = "Часто задаваемые вопросы и ответы:\n\n";
+  let response = "*Часто задаваемые вопросы и ответы:*\n\n";
 
   faq.faq.forEach((qa) => {
-    response += `Вопрос: ${qa.question}\nОтвет: ${qa.answer}\n\n`;
+    response += `*❓ Вопрос:* ${qa.question}\n*💬 Ответ:* ${qa.answer}\n\n`;
   });
 
-  ctx.reply(response);
+  ctx.reply(response, { parse_mode: "Markdown" });
 });
 
 bot.command("account", async (ctx) => {
@@ -244,6 +354,7 @@ bot.command("account", async (ctx) => {
       inline_keyboard: [
         [{ text: "В личный кабинет", web_app: { url: account } }],
         [{ text: "За актуальным расписанием", web_app: { url: schedule } }],
+        [{ text: "В кампус", web_app: { url: campus } }],
       ],
     },
   });
